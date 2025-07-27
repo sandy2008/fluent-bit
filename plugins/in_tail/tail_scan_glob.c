@@ -204,15 +204,28 @@ static int tail_scan_path(const char *path, struct flb_tail_config *ctx)
     globbuf.gl_pathv = NULL;
 
     /* Scan the given path */
-    ret = do_glob(path, GLOB_TILDE | GLOB_ERR, NULL, &globbuf);
+    /* Use GLOB_ERR flag based on configuration */
+    int glob_flags = GLOB_TILDE;
+    if (!ctx->skip_permission_errors) {
+        glob_flags |= GLOB_ERR;
+    }
+    
+    ret = do_glob(path, glob_flags, NULL, &globbuf);
     if (ret != 0) {
         switch (ret) {
         case GLOB_NOSPACE:
             flb_plg_error(ctx->ins, "no memory space available");
             return -1;
         case GLOB_ABORTED:
-            flb_plg_error(ctx->ins, "read error, check permissions: %s", path);
-            return -1;
+            if (ctx->skip_permission_errors) {
+                /* Skip permission errors and continue processing */
+                flb_plg_warn(ctx->ins, "skipping path due to permission errors: %s", path);
+                return 0;  /* Return 0 to allow other patterns to be processed */
+            } else {
+                /* Fail on permission errors (legacy behavior) */
+                flb_plg_error(ctx->ins, "read error, check permissions: %s", path);
+                return -1;
+            }
         case GLOB_NOMATCH:
             ret = stat(path, &st);
             if (ret == -1) {
